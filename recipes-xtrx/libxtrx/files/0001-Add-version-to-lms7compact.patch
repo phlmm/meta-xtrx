@@ -1,0 +1,14 @@
+Submodule liblms7002m contains modified content
+Upstream-Status: Inappropriate [Test artefact]
+diff --git a/liblms7002m/CMakeLists.txt b/liblms7002m/CMakeLists.txt
+index 8822807..3c549ea 100644
+--- a/liblms7002m/CMakeLists.txt
++++ b/liblms7002m/CMakeLists.txt
+@@ -65,6 +65,7 @@ else()
+     set(LIBLMS7_TYPE SHARED)
+ endif()
+ add_library(lms7compact ${LIBLMS7_TYPE} ${LIBLMS7_FILES})
++set_target_properties(lms7compact PROPERTIES VERSION ${LIBVER} SOVERSION ${MAJOR_VERSION})
+
+ install(TARGETS lms7compact DESTINATION ${LIBLMS7002M_LIBRARY_DIR})
+ ########################################################################

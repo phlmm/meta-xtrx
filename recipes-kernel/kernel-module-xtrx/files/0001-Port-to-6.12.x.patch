@@ -1,0 +1,326 @@
+diff --git a/Makefile b/Makefile
+Upstream-Status: Inappropriate [Test artefact]
+index 50e1955..5c535b8 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,16 +1,14 @@
+-ifneq ($(KERNELRELEASE),)
++obj-m := xtrx.o
+ 
+-obj-m += xtrx.o
++SRC := $(shell pwd)
+ 
+-else
++all:
++	$(MAKE) -C $(KERNEL_SRC) M=$(SRC)
+ 
+-KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+-
+-modules modules_install clean::
+-	make -C $(KERNELDIR) M=$(PWD) $@
+-
+-clean::
+-	rm -f *.o Module.markers modules.order
+-
+-endif
++modules_install:
++	$(MAKE) -C $(KERNEL_SRC) M=$(SRC) modules_install
+ 
++clean:
++	rm -f *.o *~ core .depend .*.cmd *.ko *.mod.c
++	rm -f Module.markers Module.symvers modules.order
++	rm -rf .tmp_versions Modules.symvers
+diff --git a/xtrx.c b/xtrx.c
+index c9ac97b..b0ce8ee 100644
+--- a/xtrx.c
++++ b/xtrx.c
+@@ -35,15 +35,16 @@
+ #include <linux/serial.h>
+ #include <linux/serial_core.h>
+ #include <linux/serial_reg.h>
++#include <linux/kfifo.h>
+ #include <linux/device.h>
+ #include <linux/time.h>
+ #include <linux/pps_kernel.h>
+ #include <linux/version.h>
+ #include <linux/slab.h>
+-#include <asm/page.h>
+-#include <asm/io.h>
+-#include <asm/uaccess.h>
+-#include <asm/atomic.h>
++#include <linux/io.h>      // Replaces asm/io.h
++#include <linux/uaccess.h> // Replaces asm/uaccess.h
++#include <linux/atomic.h>  // Replaces asm/atomic.h
++#include <linux/string.h>  // Add this: Required for memset()
+ 
+ #include "xtrx_defs.h"
+ 
+@@ -177,9 +178,10 @@ MODULE_VERSION("0.1");
+  * mmaped to userspce. Convertion DMA->PA->VA does the trick on that
+  * platforms
+  */
+-#ifdef CONFIG_CPU_RK3399
+-#define VA_DMA_ADDR_FIXUP
+-#endif
++
++//#if defined(__arm__) || defined(__aarch64__)
++//#define VA_DMA_ADDR_FIXUP
++//#endif
+ 
+ 
+ static void xtrx_writel(struct xtrx_dev *dev, unsigned int off, unsigned int value)
+@@ -361,8 +363,13 @@ static void xtrx_uart_shutdown(struct uart_port *port)
+ }
+ 
+ static void xtrx_uart_set_termios(struct uart_port *port,
+-				 struct ktermios *new,
+-				 struct ktermios *old)
++				  struct ktermios *new,
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
++				  struct ktermios *old
++#else
++				  const struct ktermios *old
++#endif
++	)
+ {
+ 	unsigned long flags;
+ 
+@@ -446,7 +453,11 @@ void xtrx_uart_do_rx(struct uart_port *port, unsigned* fifo_used)
+ 
+ static void xtrx_uart_do_tx(struct uart_port *port, unsigned fifo_used)
+ {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+ 	struct circ_buf *xmit;
++#else
++	struct tty_port *tport;
++#endif
+ 	unsigned int max_count;
+ 	struct xtrx_dev *dev = xtrx_dev_from_uart_port(port);
+ 
+@@ -464,29 +475,53 @@ static void xtrx_uart_do_tx(struct uart_port *port, unsigned fifo_used)
+ 		return;
+ 	}
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+ 	xmit = &port->state->xmit;
+ 	if (uart_circ_empty(xmit))
+ 		goto txq_empty;
++#else
++	tport = &port->state->port;
++	if (kfifo_is_empty(&tport->xmit_fifo))
++		goto txq_empty;
++#endif
+ 
+ 	max_count = port->fifosize - fifo_used;
+ 	while (max_count--) {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+ 		unsigned int c;
+ 
+ 		c = xmit->buf[xmit->tail] & 0xff;
+ 		//printk(KERN_NOTICE PFX "Char: %x\n", c);
++#else
++		unsigned char c;
++
++		if (kfifo_is_empty(&tport->xmit_fifo) || kfifo_get(&tport->xmit_fifo, &c) == 0)
++			break;
++#endif
+ 		xtrx_writel(dev, (port->line % XTRX_UART_NUM == XTRX_UART_LINE_GPS) ?
+-				    GP_PORT_WR_UART_TX : GP_PORT_WR_SIM_TX, c);
++					GP_PORT_WR_UART_TX : GP_PORT_WR_SIM_TX, c);
++
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+ 		xmit->tail = (xmit->tail + 1) & (UART_XMIT_SIZE - 1);
+ 		port->icount.tx++;
+ 		if (uart_circ_empty(xmit))
+ 			break;
++#endif
+ 	}
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 10, 0)
+ 	if (uart_circ_chars_pending(xmit) < WAKEUP_CHARS)
+ 		uart_write_wakeup(port);
+ 
+ 	if (uart_circ_empty(xmit))
+ 		goto txq_empty;
++#else
++	if (kfifo_len(&tport->xmit_fifo) < WAKEUP_CHARS)
++		uart_write_wakeup(port);
++
++	if (kfifo_is_empty(&tport->xmit_fifo))
++		goto txq_empty;
++#endif
+ 	return;
+ 
+ txq_empty:
+@@ -524,16 +559,10 @@ static struct uart_ops xtrx_uart_ops = {
+ 	//.ioctl          = xtrx_uart_verify_ioctl,
+ };
+ 
+-
+-// TODO get rid of constant
+-#define TTY_XTRX_MAJOR 234
+-
+ static struct uart_driver xtrx_uart_driver = {
+ 	.owner		= THIS_MODULE,
+ 	.driver_name	= "xtrxuart",
+ 	.dev_name	= "ttyXTRX",
+-	.major		= TTY_XTRX_MAJOR,
+-	.minor		= 64,
+ 	.nr		= XTRX_UART_NUM * MAX_XTRX_DEVS,
+ 	.cons		= NULL,
+ };
+@@ -621,11 +650,19 @@ static int xtrx_allocdma(struct xtrx_dev *d, struct xtrx_dmabuf_nfo *pbufs, unsi
+ {
+ 	int i;
+ 	for (i = 0; i < BUFS; i++) {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+ 		pbufs[i].virt = pci_alloc_consistent(d->pdev, buflen, &pbufs[i].phys);
++#else
++		pbufs[i].virt = dmam_alloc_coherent(&d->pdev->dev, buflen, &pbufs[i].phys, GFP_KERNEL);
++#endif
+ 		if (!pbufs[i].virt) {
+ 			printk(KERN_INFO PFX "Failed to allocate %d DMA buffer", i);
+ 			for (; i >= 0; --i) {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+ 				pci_free_consistent(d->pdev, buflen, pbufs[i].virt, pbufs[i].phys);
++#else
++				dma_free_coherent(&d->pdev->dev, buflen, pbufs[i].virt, pbufs[i].phys);
++#endif
+ 			}
+ 			return -1;
+ 		}
+@@ -666,7 +703,11 @@ static void xtrx_freedma_rx(struct xtrx_dev *d)
+ {
+ 	int i;
+ 	for (i = 0; i < BUFS; i++) {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+ 		pci_free_consistent(d->pdev, d->buf_rx_size, d->buf_rx[i].virt, d->buf_rx[i].phys);
++#else
++		dma_free_coherent(&d->pdev->dev, d->buf_rx_size, d->buf_rx[i].virt, d->buf_rx[i].phys);
++#endif
+ 	}
+ 	d->buf_rx_size = 0;
+ }
+@@ -675,7 +716,11 @@ static void xtrx_freedma_tx(struct xtrx_dev *d)
+ {
+ 	int i;
+ 	for (i = 0; i < BUFS; i++) {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+ 		pci_free_consistent(d->pdev, d->buf_tx_size, d->buf_tx[i].virt, d->buf_tx[i].phys);
++#else
++		dma_free_coherent(&d->pdev->dev, d->buf_tx_size, d->buf_tx[i].virt, d->buf_tx[i].phys);
++#endif
+ 	}
+ 	d->buf_tx_size = 0;
+ }
+@@ -1051,7 +1096,11 @@ static int xtrxfd_mmap(struct file *filp, struct vm_area_struct *vma)
+ 			return -EINVAL;
+ 		}
+ 		//vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
+ 		vma->vm_flags |= VM_LOCKED;
++#else
++		vm_flags_set(vma, VM_LOCKED);
++#endif
+ 
+ 		if (remap_pfn_range(vma, vma->vm_start,
+ 							virt_to_phys((void*)((unsigned long)xtrxdev->shared_mmap)) >> PAGE_SHIFT,
+@@ -1066,7 +1115,11 @@ static int xtrxfd_mmap(struct file *filp, struct vm_area_struct *vma)
+ 		unsigned long pfn;
+ 		int bar = (region == REGION_CTRL) ? 0 : 1;
+ 		vma->vm_page_prot = pgprot_device(vma->vm_page_prot);
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
+ 		vma->vm_flags |= VM_IO;
++#else
++		vm_flags_set(vma, VM_IO);
++#endif
+ 		pfn = pci_resource_start(xtrxdev->pdev, bar) >> PAGE_SHIFT;
+ 
+ 		if (io_remap_pfn_range(vma, vma->vm_start, pfn,
+@@ -1091,21 +1144,23 @@ static int xtrxfd_mmap(struct file *filp, struct vm_area_struct *vma)
+ 		}
+ 
+ 		//vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
+ 		vma->vm_flags |= VM_LOCKED;
+-
+-		for (i = 0, off = 0; i < BUFS; ++i, off += bufsize) {
+-#ifdef VA_DMA_ADDR_FIXUP
+-			void *va = phys_to_virt(dma_to_phys(&xtrxdev->pdev->dev, pbufs[i].phys));
+ #else
+-			void *va = pbufs[i].virt;
++		vm_flags_set(vma, VM_LOCKED);
+ #endif
+-			pfn = page_to_pfn(virt_to_page(va));
+ 
+-			ret = remap_pfn_range(vma, vma->vm_start + off,
+-						pfn,
+-						bufsize,
+-						vma->vm_page_prot);
+-		}
++            for (i = 0, off = 0; i < BUFS; ++i, off += bufsize) {
++            /* Use the virtual address directly, as provided by dma_alloc_coherent */
++            void *va = pbufs[i].virt;
++            
++            pfn = page_to_pfn(virt_to_page(va));
++
++            ret = remap_pfn_range(vma, vma->vm_start + off,
++                                    pfn,
++                                    bufsize,
++                                    vma->vm_page_prot);
++        }
+ 
+ 		return ret;
+ 	}
+@@ -1162,7 +1217,11 @@ static int xtrx_probe(struct pci_dev *pdev,
+ 
+ 	pci_set_master(pdev);
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 18, 0)
+ 	if (pci_set_consistent_dma_mask(pdev, DMA_BIT_MASK(32))) {
++#else
++	if (dma_set_mask_and_coherent(&pdev->dev, DMA_BIT_MASK(32))) {
++#endif
+ 		dev_err(&pdev->dev,"No suitable consistent DMA available.\n");
+ 		goto err_disable_pdev;
+ 	}
+@@ -1191,8 +1250,8 @@ static int xtrx_probe(struct pci_dev *pdev,
+ 	}
+ 
+ 	bar1_addr = pci_iomap(pdev, 1,  1 << 16);
+-	if (!bar0_addr) {
+-		dev_err(&pdev->dev, "Failed to map BAR 0.\n");
++	if (!bar1_addr) {
++		dev_err(&pdev->dev, "Failed to map BAR 1.\n");
+ 		goto err_unmap0;
+ 	}
+ 
+@@ -1495,7 +1554,12 @@ static int __init xtrx_init(void)
+ 		goto failed_chrdev;
+ 	}
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
+ 	xtrx_class = class_create(THIS_MODULE, CLASS_NAME);
++#else
++	xtrx_class = class_create(CLASS_NAME);
++#endif
++
+ 	if (IS_ERR(xtrx_class)) {
+ 		printk(KERN_NOTICE PFX "Unable to register xtrx class\n");
+ 		goto failed_setup_cdev;
+@@ -1509,7 +1573,6 @@ static int __init xtrx_init(void)
+ 	return 0;
+ 
+ failed_pci:
+-	class_unregister(xtrx_class);
+ 	class_destroy(xtrx_class);
+ failed_setup_cdev:
+ 	unregister_chrdev_region(dev_first, devices);
+@@ -1526,7 +1589,6 @@ static void __exit xtrx_cleanup(void)
+ 
+ 	pci_unregister_driver(&xtrx_driver);
+ 
+-	class_unregister(xtrx_class);
+ 	class_destroy(xtrx_class);
+ 
+ 	unregister_chrdev_region(dev_first, devices);
