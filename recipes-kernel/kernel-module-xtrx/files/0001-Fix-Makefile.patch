@@ -1,0 +1,44 @@
+From 90fc271828bcbd6d0215a0208390efc398a3c940 Mon Sep 17 00:00:00 2001
+From: kas User <kas@example.com>
+Date: Sun, 21 Dec 2025 19:47:00 +0200
+Subject: [PATCH] Fix Makefile
+Upstream-Status: Inappropriate [Test artefact]
+
+Signed-off-by: kas User <kas@example.com>
+---
+ Makefile | 20 +++++++++-----------
+ 1 file changed, 9 insertions(+), 11 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 50e1955..dbd80b8 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,16 +1,14 @@
+-ifneq ($(KERNELRELEASE),)
+-
+ obj-m += xtrx.o
+ 
+-else
+-
+-KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+-
+-modules modules_install clean::
+-	make -C $(KERNELDIR) M=$(PWD) $@
++SRC := $(shell pwd)
+ 
+-clean::
+-	rm -f *.o Module.markers modules.order
++all:
++	$(MAKE) -C $(KERNEL_SRC) M=$(SRC)
+ 
+-endif
++modules_install:
++	$(MAKE) -C $(KERNEL_SRC) M=$(SRC) modules_install
+ 
++clean:
++	rm -f *.o *~ core .depend .*.cmd *.ko *.mod.c
++	rm -f Module.markers Module.symvers modules.order
++	rm -rf .tmp_versions Modules.symvers
+-- 
+2.47.3
+

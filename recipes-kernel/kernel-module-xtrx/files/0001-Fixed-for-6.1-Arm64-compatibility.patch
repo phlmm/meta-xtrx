@@ -1,29 +1,19 @@
-From 588392ccf780f71121ab76242aec3f953b097db7 Mon Sep 17 00:00:00 2001
+From 919a3c64555d81114404a90ecdacd533f45975f0 Mon Sep 17 00:00:00 2001
 From: kas User <kas@example.com>
-Date: Sun, 21 Dec 2025 17:47:32 +0200
+Date: Sun, 21 Dec 2025 21:08:54 +0200
 Subject: [PATCH] Fixed for 6.1 / Arm64 compatibility
+Upstream-Status: Inappropriate [Test artefact]
 
 Signed-off-by: kas User <kas@example.com>
 ---
- xtrx.c | 2220 ++++++++++++++++++++++++++++----------------------------
- 1 file changed, 1129 insertions(+), 1091 deletions(-)
+ xtrx.c | 2210 ++++++++++++++++++++++++++++----------------------------
+ 1 file changed, 1123 insertions(+), 1087 deletions(-)
 
 diff --git a/xtrx.c b/xtrx.c
-index c9ac97b..9107c96 100644
+index c9ac97b..c87f473 100644
 --- a/xtrx.c
 +++ b/xtrx.c
-@@ -19,6 +19,10 @@
-  * USA.
-  */
- 
-+/*
-+ * Fixed for Linux Kernel 6.1+ / ARM64 compatibility.
-+ */
-+
- #include <linux/module.h>
- #include <linux/init.h>
- #include <linux/errno.h>
-@@ -30,20 +34,22 @@
+@@ -30,20 +30,22 @@
  #include <linux/sched.h>
  #include <linux/poll.h>
  #include <linux/mm.h>
@@ -43,14 +33,14 @@ index c9ac97b..9107c96 100644
 -#include <asm/io.h>
 -#include <asm/uaccess.h>
 -#include <asm/atomic.h>
-+#include <linux/io.h>
-+#include <linux/uaccess.h>
-+#include <linux/atomic.h>
-+#include <linux/string.h>
++#include <linux/io.h>      
++#include <linux/uaccess.h> 
++#include <linux/atomic.h>  
++#include <linux/string.h> 
  
  #include "xtrx_defs.h"
  
-@@ -52,45 +58,45 @@
+@@ -52,45 +54,45 @@
  
  #define MAX_XTRX_DEVS 64
  
@@ -114,7 +104,7 @@ index c9ac97b..9107c96 100644
  #define BUF_SIZE  32768
  
  #define BUF_SIZE_MIN       8192
-@@ -100,72 +106,72 @@ enum xtrx_uart_types {
+@@ -100,72 +102,72 @@ enum xtrx_uart_types {
  
  
  struct xtrx_dmabuf_nfo {
@@ -224,7 +214,7 @@ index c9ac97b..9107c96 100644
  
  
  MODULE_AUTHOR("Sergey Kostanbaev <sergey.kostanbaev@fairwaves.co>");
-@@ -173,60 +179,52 @@ MODULE_DESCRIPTION("XTRX low-level PCIe driver");
+@@ -173,60 +175,52 @@ MODULE_DESCRIPTION("XTRX low-level PCIe driver");
  MODULE_LICENSE("GPL");
  MODULE_VERSION("0.1");
  
@@ -249,8 +239,7 @@ index c9ac97b..9107c96 100644
 +    return be32_to_cpu(ioread32((void __iomem *)((unsigned long)dev->bar0_addr + 4*off)));
  }
  
--static int xtrx_power_op(struct xtrx_dev *dev, int on, unsigned mask) 
-+static int xtrx_power_op(struct xtrx_dev *dev, int on, unsigned mask)
+ static int xtrx_power_op(struct xtrx_dev *dev, int on, unsigned mask) 
  {
 -	unsigned long flags;
 -
@@ -291,7 +280,7 @@ index c9ac97b..9107c96 100644
 +    spin_lock_irqsave(&dev->slock, flags);
 +    if (on) {
 +        if (dev->pwr_msk == 0) {
-+            do_pwr_op = 1;
++            do_pwr_op = 1; 
 +        }
 +        dev->pwr_msk |= mask;
 +    } else {
@@ -321,7 +310,7 @@ index c9ac97b..9107c96 100644
  }
  
  #define PORT_XTRX 0x03300330
-@@ -236,57 +234,53 @@ static int xtrx_power_op(struct xtrx_dev *dev, int on, unsigned mask)
+@@ -236,57 +230,53 @@ static int xtrx_power_op(struct xtrx_dev *dev, int on, unsigned mask)
   */
  static unsigned int xtrx_uart_tx_empty(struct uart_port *port)
  {
@@ -402,7 +391,7 @@ index c9ac97b..9107c96 100644
  }
  
  static void xtrx_uart_enable_ms(struct uart_port *port)
-@@ -302,1248 +296,1292 @@ static void xtrx_uart_do_rx(struct uart_port *port, unsigned* fifo_used);
+@@ -302,1248 +292,1294 @@ static void xtrx_uart_do_rx(struct uart_port *port, unsigned* fifo_used);
  
  static int xtrx_uart_startup(struct uart_port *port)
  {
@@ -968,7 +957,7 @@ index c9ac97b..9107c96 100644
 -		xtrx_set_dma_bufs(d, pbufs, 0x800, len);
 -	}
 +    if ((GET_HWID_COMPAT(d->hwid) >= 1)) {
-+        uint32_t pktsz = (unsigned)((len / ) - 1) | (1U << 31);
++        uint32_t pktsz = (unsigned)((len / 16) - 1) | (1U << 31);
 +        xtrx_writel(d, UL_RXDMA_ADDR + 32, pktsz);
 +    } else {
 +        xtrx_set_dma_bufs(d, pbufs, 0x800, len);
@@ -1474,7 +1463,7 @@ index c9ac97b..9107c96 100644
 +        if (!i) {
 +            return -EAGAIN;
 +        }
-+        reatomic_xchg(((atomic_t*)xtrxdev->shared_mmap) + XTRX_KERN_MMAP_CTRL_IRQS, 0);
++        return atomic_xchg(((atomic_t*)xtrxdev->shared_mmap) + XTRX_KERN_MMAP_CTRL_IRQS, 0);
 +
 +    case XTRX_KERN_MMAP_I2C_IRQS:
 +        i = wait_event_interruptible_timeout(
@@ -1642,7 +1631,7 @@ index c9ac97b..9107c96 100644
 +            return xtrxdev->buf_rx_size;
 +        }
 +        case 0x12345B: {
-+            return xtrx_power_op(xtrxdev, ioparam, XTRX_BLK_CHAR_DEV);
++            return xtrx_power_op(xtrxdev, ioctl_param, XTRX_BLK_CHAR_DEV);
 +        }
 +        default: return -EINVAL;
 +    }
@@ -1839,15 +1828,15 @@ index c9ac97b..9107c96 100644
 +        }
 +
 +#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 3, 0)
-+        vma->vm_flags |_LOCKED;
++        vma->vm_flags |= VM_LOCKED;
 +#else
 +        vm_flags_set(vma, VM_LOCKED);
 +#endif
  
 -	return -EINVAL;
 +        for (i = 0, off = 0; i < BUFS; ++i, off += bufsize) {
-+            /* * CRITICAL FIX FOR KERNEL 6.1+ ON ARM64/RZV2H
-+             * Check if the address is vmalloc/CMA (non-linear)
++            /* * CRITICAL FIX FOR KERNEL 6.1+ ON ARM64/RZV2H 
++             * Check if the address is vmalloc/CMA (non-linear) 
 +             * and use the correct conversion function.
 +             */
 +            void *va = pbufs[i].virt;
@@ -2096,7 +2085,7 @@ index c9ac97b..9107c96 100644
 +
 +    xtrxdev->hwid = xtrx_readl(xtrxdev, GP_PORT_RD_HWCFG);
 +
-+    xtrxdev->pps = pps_register_source(&xtrx_pps_in
++    xtrxdev->pps = pps_register_source(&xtrx_pps_info,
 +                        PPS_CAPTUREASSERT | PPS_OFFSETASSERT);
 +    if (!xtrxdev->pps) {
 +        dev_err(&pdev->dev, "Failed to register 1PPS source.\n");
@@ -2272,7 +2261,7 @@ index c9ac97b..9107c96 100644
 +                dev_err(&pdev->dev, "Failed to register SINGLE MSI.\n");
 +                err = -ENODEV;
 +                goto err_msi;
-+            }
++            }    
 +        } else {
 +            dev_err(&pdev->dev, "Failed to enable MSI, falling back to legacy mode.\n");
 +            xtrxdev->inttype = XTRX_LEGACY;
@@ -2320,7 +2309,7 @@ index c9ac97b..9107c96 100644
 +
 +    xtrxdev->valid = 1;
 +    xtrxdev->cdevice = device_create(xtrx_class,
-+          ev->dev,
++                      &pdev->dev,
 +                      MKDEV(MAJOR(dev_first), MINOR(dev_first) + devices),
 +                      NULL,
 +                      DEVICE_NAME "%d",
@@ -2527,14 +2516,13 @@ index c9ac97b..9107c96 100644
 +    { 0, }
  };
  
--MODULE_DEVICE_TABLE(pci, xtrx_pci_table);
--
--static struct pci_driver xtrx_driver = {
+ MODULE_DEVICE_TABLE(pci, xtrx_pci_table);
+ 
+ static struct pci_driver xtrx_driver = {
 -	.name		= DRV_NAME,
 -	.id_table	= xtrx_pci_table,
 -	.probe		= xtrx_probe,
 -	.remove		= xtrx_remove
-+MODULE_DEVICE_TAver xtrx_driver = {
 +    .name        = DRV_NAME,
 +    .id_table    = xtrx_pci_table,
 +    .probe        = xtrx_probe,
