@@ -10,7 +10,7 @@ PR = "r0"
 PV = "1.0+git"
 
 SRC_URI = "gitsm://github.com/xtrx-sdr/images.git;protocol=https;branch=master"
-SRC_URI += "file://0001-Port-to-6.12.x.patch"
+SRC_URI += "file://0001-Fixed-for-6.1-Arm64-compatibility.patch"
 
 SRCREV = "e7c68fa621004ee0d6a65171c786fd9d5a1f2ce6"
 S:append = "/sources/xtrx_linux_pcie_drv"
