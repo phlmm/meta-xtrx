@@ -1,0 +1,5 @@
+FILESEXTRAPATHS:prepend := "${THISDIR}/${PN}:"
+PACKAGECONFIG ?= ""
+EXTRA_OECMAKE ?= ""
+DEPENDS += "libxtrx"
+
