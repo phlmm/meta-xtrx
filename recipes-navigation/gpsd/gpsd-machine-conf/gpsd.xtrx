@@ -3,7 +3,7 @@ START_DAEMON="true"
 USBAUTO="false"
 
 # Point to the XTRX TTY alias
-DEVICES="/dev/ttyXTRX0"
+DEVICES="/dev/ttyXTRX0 /dev/pps0"
 
 # Options: -n (don't wait for client to connect), -b (read-only/broken-device-safety)
 GPSD_OPTIONS="-n -b"
