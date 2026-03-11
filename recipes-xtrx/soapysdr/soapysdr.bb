@@ -16,3 +16,5 @@ DEPENDS += "swig-native"
 inherit cmake pkgconfig python3native
 FILES:${PN} += "${PYTHON_SITEPACKAGES_DIR}/SoapySDR*"
 FILES:${PN} += "${PYTHON_SITEPACKAGES_DIR}/_SoapySDR*"
+
+BBCLASSEXTEND += "native"

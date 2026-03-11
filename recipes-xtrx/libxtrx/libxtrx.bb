@@ -26,5 +26,6 @@ inherit cmake python3native
 
 EXTRA_OECMAKE += "-DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DENABLE_USB3380=0 -DENABLE_SOAPY=1"
 
-FILES:${PN} += "${libdir}/" 
-FILES:${PN}-mod-src = "/usr/src/*" 
+FILES:${PN} += "${libdir}/"
+FILES:${PN}-mod-src = "/usr/src/*"
+BBCLASSEXTEND += "native"
